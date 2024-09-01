@@ -1,93 +1,57 @@
-
-#include "../includes/pipex.h"
-
-/* Child process that create a fork and a pipe, put the output inside a pipe
- and then close with the exec function. The main process will change his stdin
- for the pipe file descriptor. */
-void	child_process(char *argv, char **envp)
+void create_pipes(char **commande, t_env **env, t_data **data, t_hold **hold_vars, int fd_in, int fd_out)
 {
-	pid_t	pid;
-	int		fd[2];
+    int pid;
 
-	if (pipe(fd) == -1)
-		error();
-	pid = fork();
-	if (pid == -1)
-		error();
-	if (pid == 0)
-	{
-		close(fd[0]);
-		dup2(fd[1], STDOUT_FILENO);
-		execute(argv, envp);
-	}
-	else
-	{
-		close(fd[1]);
-		dup2(fd[0], STDIN_FILENO);
-		waitpid(pid, NULL, 0);
-	}
+    if ((pid = fork()) == -1)
+    {
+        perror("Error creating new process");
+        exit(1);
+    }
+    if (pid == 0)
+    {
+        if (fd_in != 0)
+        {
+            dup2(fd_in, 0);
+            close(fd_in);
+        }
+        if (fd_out != 1)
+        {
+            dup2(fd_out, 1);
+            close(fd_out);
+        }
+        exec_simple_commande(commande, env, data, hold_vars);
+        exit(0);
+    }
 }
 
-/* Function who make a child process that will read from the stdin with
- get_next_line until it find the limiter word and then put the output inside a
- pipe. The main process will change his stdin for the pipe file descriptor. */
-void	here_doc(char *limiter, int argc)
+void exec_with_pipes(t_env **envp, t_data **data, t_hold **hold_vars)
 {
-	pid_t	reader;
-	int		fd[2];
-	char	*line;
+    t_data *temp;
+    int fd[2];
+    int fd_in = 0;
+    int status;
 
-	if (argc < 6)
-		usage();
-	if (pipe(fd) == -1)
-		error();
-	reader = fork();
-	if (reader == 0)
-	{
-		close(fd[0]);
-		while (get_next_line(&line))
-		{
-			if (ft_strncmp(line, limiter, ft_strlen(limiter)) == 0)
-				exit(EXIT_SUCCESS);
-			write(fd[1], line, ft_strlen(line));
-		}
-	}
-	else
-	{
-		close(fd[1]);
-		dup2(fd[0], STDIN_FILENO);
-		wait(NULL);
-	}
-}
-
-/* Main function that run the childs process with the right file descriptor
- or display an error message if arguments are wrong. It will run here_doc
- function if the "here_doc" string is find in argv[1] */
-int	main(int argc, char **argv, char **envp)
-{
-	int	i;
-	int	filein;
-	int	fileout;
-
-	if (argc >= 5)
-	{
-		if (ft_strncmp(argv[1], "here_doc", 8) == 0)
-		{
-			i = 3;
-			fileout = open_file(argv[argc - 1], 0);
-			here_doc(argv[2], argc);
-		}
-		else
-		{
-			i = 2;
-			fileout = open_file(argv[argc - 1], 1);
-			filein = open_file(argv[1], 2);
-			dup2(filein, STDIN_FILENO);
-		}
-		while (i < argc - 2)
-			child_process(argv[i++], envp);
-		dup2(fileout, STDOUT_FILENO);
-		execute(argv[argc - 2], envp);
-	}
-	usage();
+    temp = *data;
+    int i = 0;
+    while (temp)
+    {
+        if (temp->next != NULL)
+        {
+            if (pipe(fd) == -1)
+            {
+                perror("Error creating pipe");
+                exit(1);
+            }
+        }
+        else
+            fd[1] = 1;
+        create_pipes(temp->argumment, envp, data, hold_vars, fd_in, fd[1]);
+        if (fd_in != 0)
+            close(fd_in);
+        if (fd[1] != 1)
+            close(fd[1]);
+        fd_in = fd[0];
+        temp = temp->next;
+    }
+    while (wait(&status) > 0);
 }
